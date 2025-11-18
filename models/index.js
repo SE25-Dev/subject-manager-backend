@@ -34,4 +34,18 @@ Object.keys(db).forEach(modelName => {
 db.sequelize = sequelize;
 db.Sequelize = Sequelize;
 
+// Function to seed UserRoles
+db.sequelize.sync().then(async () => {
+    const roles = ['headteacher', 'teacher', 'student'];
+    for (const roleName of roles) {
+        await db.UserRole.findOrCreate({
+            where: { name: roleName },
+            defaults: { name: roleName }
+        });
+    }
+    console.log("User roles seeded successfully.");
+}).catch(err => {
+    console.error("Error seeding user roles:", err);
+});
+
 module.exports = db;

@@ -38,6 +38,7 @@ app.use("/notifications", require("./routes/notifications"));
 app.use("/sections", require("./routes/sections"));
 
 app.use("/users", require("./routes/users"));
+app.use("/files", require("./routes/files"));
 
 http.listen(port, () => {
   console.log("Server running on port:" + port);
