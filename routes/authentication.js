@@ -5,6 +5,7 @@ const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
 const { readFirstLine } = require("../helpers/utils");
+const { verifyTokenAndExtractUser } = require('../helpers/authMiddleware');
 
 const db_2 = require('../models_2'); // Using models_2
 const User = db_2.User; // Using User from models_2
@@ -20,7 +21,7 @@ const objectWithoutKey = (object, key) => {
     return otherKeys;
 };
 
-auth_api.post("/register", (req, res) => {
+auth_api.post("/register", async (req, res) => {
     const userData = {
         firstName: req.body.firstName,
         lastName: req.body.lastName,
@@ -33,115 +34,100 @@ auth_api.post("/register", (req, res) => {
         userData.email = req.body.email;
     }
 
-    User.findOne({
-        where: {
-            username: userData.username, // Check for username instead of login
-        },
-    })
-        .then((user) => {
-            if (!user || user == null) {
-                let hash = bcrypt.hashSync(userData.password, 10);
-                userData.password = hash;
-
-                User.create(userData)
-                    .then((user) => {
-                        let token = jwt.sign(
-                            objectWithoutKey(user.dataValues, "password"),
-                            process.env.SECRET_KEY,
-                            {
-                                expiresIn: "2h",
-                            }
-                        );
-                        res.json({
-                            token: token,
-                        });
-                    })
-                    .catch((error) => {
-                        res.send("error: " + error);
-                    });
-            } else {
-                res.json("usernametaken"); // Changed from logintaken
-            }
-        })
-        .catch((error) => {
-            res.json("error: " + error);
+    try {
+        const user = await User.findOne({
+            where: {
+                username: userData.username,
+            },
         });
+
+        if (!user) {
+            let hash = bcrypt.hashSync(userData.password, 10);
+            userData.password = hash;
+
+            const newUser = await User.create(userData);
+            let token = jwt.sign(
+                objectWithoutKey(newUser.dataValues, "password"),
+                process.env.SECRET_KEY,
+                {
+                    expiresIn: "2h",
+                }
+            );
+            res.json({ token: token });
+        } else {
+            res.status(409).json({ error: "Username already taken." });
+        }
+    } catch (error) {
+        res.status(500).json({ error: "Registration failed: " + error });
+    }
 });
 
-auth_api.post("/login", (req, res) => {
+auth_api.post("/login", async (req, res) => {
     const userData = {
-        username: req.body.username, // Changed from login
+        username: req.body.username,
         password: req.body.password,
     };
 
-    User.findOne({
-        where: {
-            username: userData.username, // Changed from login
-        },
-    })
-        .then((user) => {
-            if (user) {
-                let pass = bcrypt.compareSync(userData.password, user.password);
-
-                if (pass) {
-                    let token = jwt.sign(
-                        objectWithoutKey(user.dataValues, "password"),
-                        process.env.SECRET_KEY,
-                        {
-                            expiresIn: "2h",
-                        }
-                    );
-                    res.json({
-                        token: token,
-                    });
-                } else {
-                    res.json("wrongpassword");
-                }
-            } else {
-                res.json("nouser");
-            }
-        })
-        .catch((err) => {
-            res.json("error: " + err);
+    try {
+        const user = await User.findOne({
+            where: {
+                username: userData.username,
+            },
         });
-});
 
-auth_api.post("/update_token", (req, res) => {
-    const userData = {
-        username: req.body.username, // Changed from login
-    };
+        if (user) {
+            let pass = bcrypt.compareSync(userData.password, user.password);
 
-    User.findOne({
-        where: {
-            username: userData.username, // Changed from login
-        },
-    })
-        .then((user) => {
-            if (user) {
+            if (pass) {
                 let token = jwt.sign(
                     objectWithoutKey(user.dataValues, "password"),
                     process.env.SECRET_KEY,
                     {
-                        expiresIn: 7200,
+                        expiresIn: "2h",
                     }
                 );
-                res.json({
-                    token: token,
-                });
+                res.json({ token: token });
+            } else {
+                res.status(401).json({ error: "Wrong password." });
             }
-        })
-        .catch((error) => {
-            res.json("error" + error);
-        });
+        } else {
+            res.status(404).json({ error: "User not found." });
+        }
+    } catch (err) {
+        res.status(500).json({ error: "Login failed: " + err });
+    }
 });
 
-auth_api.post("/logout", (req, res) => {
-    const token = req.headers["authorization"]?.split(" ")[1]; // Assuming Bearer token
+auth_api.post("/update_token", verifyTokenAndExtractUser, async (req, res) => {
+    const userId = req.user.id;
+
+    try {
+        const user = await User.findByPk(userId);
+
+        if (user) {
+            let token = jwt.sign(
+                objectWithoutKey(user.dataValues, "password"),
+                process.env.SECRET_KEY,
+                {
+                    expiresIn: 7200,
+                }
+            );
+            res.json({ token: token });
+        } else {
+            res.status(404).json({ error: "User not found." });
+        }
+    } catch (error) {
+        res.status(500).json({ error: "Token update failed: " + error });
+    }
+});
+
+auth_api.post("/logout", verifyTokenAndExtractUser, (req, res) => {
+    const token = req.headers["authorization"]?.split(" ")[1];
     if (!token) {
         return res.status(400).json({ message: "Token required" });
     }
 
-    blacklistedTokens.add(token); // Add token to blacklist
+    blacklistedTokens.add(token);
     res.json({ message: "Logged out successfully" });
 });
 

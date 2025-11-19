@@ -48,4 +48,18 @@ db.sequelize.sync().then(async () => {
     console.error("Error seeding user roles:", err);
 });
 
+// Function to seed Statuses
+db.sequelize.sync().then(async () => {
+    const statuses = ['Active', 'Pending', 'Archived'];
+    for (const statusName of statuses) {
+        await db.Status.findOrCreate({
+            where: { name: statusName },
+            defaults: { name: statusName }
+        });
+    }
+    console.log("Statuses seeded successfully.");
+}).catch(err => {
+    console.error("Error seeding statuses:", err);
+});
+
 module.exports = db;

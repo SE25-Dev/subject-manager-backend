@@ -2,7 +2,7 @@ const express = require("express");
 const materials_router = express.Router();
 
 const cors = require("cors");
-const jwt = require("jsonwebtoken");
+const { verifyTokenAndExtractUser, checkRole } = require('../../helpers/authMiddleware');
 const { Op } = require('sequelize');
 
 const db = require('../../models');
@@ -10,33 +10,34 @@ const Material = db.Material;
 const File = db.File;
 const UserCourseRole = db.UserCourseRole;
 const UserRole = db.UserRole;
+const MaterialFile = db.MaterialFile; // Added MaterialFile model
+
+const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
 
 materials_router.use(cors());
 materials_router.use(express.json());
 
-const verifyTokenAndExtractUser = (req, res, next) => {
-    const token = req.params?.token || req.body?.jwt || req.query?.jwt || req.headers?.authorization?.split(' ')[1];
-
-    if (!token) {
-        return res.status(401).json({ error: "No token provided." });
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        const uploadPath = path.join(__dirname, '../../uploads');
+        fs.mkdirSync(uploadPath, { recursive: true });
+        cb(null, uploadPath);
+    },
+    filename: (req, file, cb) => {
+        cb(null, Date.now() + '-' + file.originalname);
     }
+});
 
-    try {
-        const decoded = jwt.verify(token, process.env.SECRET_KEY);
-        req.user = { id: decoded.id };
-        next();
-    } catch (err) {
-        console.error("JWT Verification Error:", err.message);
-        return res.status(401).json({ error: "Invalid or expired token." });
-    }
-};
+const upload = multer({ storage: storage });
 
 /**
  * GET /:courseId/materials
  * Returns a list of materials and associated files for a given course,
  * filtered by user role and material visibility.
  */
-materials_router.get("/:courseId/get_materials", verifyTokenAndExtractUser, async (req, res) => {
+materials_router.get("/:courseId/materials", verifyTokenAndExtractUser, async (req, res) => {
     const courseId = req.params.courseId;
     const userId = req.user.id;
 
@@ -84,37 +85,12 @@ materials_router.get("/:courseId/get_materials", verifyTokenAndExtractUser, asyn
     }
 });
 
-const checkRole = (allowedRoles) => async (req, res, next) => {
-    const courseId = req.params.courseId || req.body.courseId;
-    const userId = req.user.id;
-
-    if (!courseId) {
-        return res.status(400).json({ error: "Course ID is required." });
-    }
-
-    try {
-        const userCourseRole = await UserCourseRole.findOne({
-            where: { userId, courseId },
-            include: [{ model: UserRole, as: 'role' }]
-        });
-
-        if (!userCourseRole || !allowedRoles.includes(userCourseRole.role.name)) {
-            return res.status(403).json({ error: "Access denied. Insufficient role." });
-        }
-        req.userRole = userCourseRole.role.name;
-        next();
-    } catch (error) {
-        console.error("Error checking user role:", error);
-        res.status(500).json({ error: "Failed to verify user role." });
-    }
-};
-
 /**
  * POST /:courseId/new_materials
  * Creates a new material for a course. Only accessible by 'teacher' and 'headteacher'.
  * Body: { title, description, visible, fileIds[] }
  */
-materials_router.post("/:courseId/new_materials", verifyTokenAndExtractUser, checkRole(['teacher', 'headteacher']), async (req, res) => {
+materials_router.post("/:courseId/materials", verifyTokenAndExtractUser, checkRole(['teacher', 'headteacher']), async (req, res) => {
     const courseId = req.params.courseId;
     const { title, description, visible, fileIds } = req.body;
 
@@ -185,6 +161,62 @@ materials_router.delete("/:courseId/materials/:materialId", verifyTokenAndExtrac
     } catch (error) {
         console.error("Error deleting material:", error);
         res.status(500).json({ error: "Failed to delete material." });
+    }
+});
+
+/**
+ * PUT /:courseId/materials/:materialId/edit_material
+ * Body: { title, description, visible, deletedFileIds[], newFileIds[] }
+ * Allows 'teacher' and 'headteacher' to edit a material's details and manage associated files.
+ */
+materials_router.put("/:courseId/materials/:materialId", verifyTokenAndExtractUser, checkRole(['teacher', 'headteacher']), async (req, res) => {
+    const courseId = req.params.courseId; // Used for role check context
+    const materialId = req.params.materialId;
+    const { title, description, visible, deletedFileIds, newFileIds } = req.body;
+
+    try {
+        const material = await Material.findByPk(materialId);
+
+        if (!material) {
+            return res.status(404).json({ error: "Material not found." });
+        }
+
+        // Update material properties if provided
+        if (title !== undefined) material.title = title;
+        if (description !== undefined) material.description = description;
+        if (visible !== undefined) material.visible = visible;
+        await material.save();
+
+        // Handle file deletions
+        if (deletedFileIds && Array.isArray(deletedFileIds) && deletedFileIds.length > 0) {
+            for (const fileId of deletedFileIds) {
+                const materialFile = await MaterialFile.findOne({ where: { materialId: material.id, fileId: fileId } });
+                if (materialFile) {
+                    // No need to delete from disk here, as files are managed by /routes/files.js
+                    await materialFile.destroy(); // Delete association
+                    // Optionally, delete the file record if it's no longer associated with any material
+                    const otherAssociations = await MaterialFile.count({ where: { fileId: fileId } });
+                    if (otherAssociations === 0) {
+                        await File.destroy({ where: { id: fileId } });
+                    }
+                }
+            }
+        }
+
+        // Handle new file associations
+        if (newFileIds && Array.isArray(newFileIds) && newFileIds.length > 0) {
+            const materialFilesToCreate = newFileIds.map(fileId => ({
+                materialId: material.id,
+                fileId: fileId,
+            }));
+            await MaterialFile.bulkCreate(materialFilesToCreate);
+        }
+
+        res.status(200).json({ message: "Material updated successfully.", material: material });
+
+    } catch (error) {
+        console.error("Error editing material:", error);
+        res.status(500).json({ error: "Failed to edit material." });
     }
 });
 

@@ -28,6 +28,14 @@ module.exports = (sequelize) => {
                 key: 'id',
             },
         },
+        sectionId: {
+            type: DataTypes.INTEGER,
+            allowNull: true, // Optional field
+            references: {
+                model: 'sections',
+                key: 'id',
+            },
+        },
     }, {
         tableName: 'notifications',
         timestamps: true,
@@ -37,6 +45,10 @@ module.exports = (sequelize) => {
         Notification.belongsTo(models.User, {
             foreignKey: 'userId',
             as: 'user',
+        });
+        Notification.belongsTo(models.Section, {
+            foreignKey: 'sectionId',
+            as: 'section',
         });
     };
 
