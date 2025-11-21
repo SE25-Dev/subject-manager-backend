@@ -14,7 +14,7 @@ auth_api.use(cors());
 
 const blacklistedTokens = new Set();
 
-process.env.SECRET_KEY = readFirstLine("../keys/private_key.pub");
+process.env.SECRET_KEY = readFirstLine("./keys/private_key.pub");
 
 const objectWithoutKey = (object, key) => {
     const { [key]: deletedKey, ...otherKeys } = object;
