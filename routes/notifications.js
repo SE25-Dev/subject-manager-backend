@@ -2,9 +2,9 @@ const express = require("express");
 const notifications_router = express.Router();
 
 const cors = require("cors");
-const { verifyTokenAndExtractUser } = require('../../helpers/authMiddleware');
+const { verifyTokenAndExtractUser } = require('../helpers/authMiddleware');
 
-const db = require('../../models');
+const db = require('../models');
 const Notification = db.Notification;
 const User = db.User;
 const Section = db.Section; // Added

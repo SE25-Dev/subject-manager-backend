@@ -31,13 +31,11 @@ app.use("/courses", require("./routes/courses/materials"));
 app.use("/courses", require("./routes/courses/classsessions")); // might divide this further?
 app.use("/courses", require("./routes/courses/assessments"));
 app.use("/courses", require("./routes/courses/permissions"));
+app.use("/courses", require("./routes/courses/presence"));
 app.use("/courses", require("./routes/courses/management"));
 
 app.use("/notifications", require("./routes/notifications"));
 
-app.use("/sections", require("./routes/sections"));
-
-app.use("/users", require("./routes/users"));
 app.use("/files", require("./routes/files"));
 
 http.listen(port, () => {

@@ -1,6 +1,6 @@
+const fs = require('fs');
 
-import fs from "fs";
-export async function readFirstLine(path) {
+async function readFirstLine(path) {
     return new Promise((resolve, reject) => {
         const rs = fs.createReadStream(path, { encoding: "utf8" });
         let acc = "";
@@ -23,3 +23,7 @@ export async function readFirstLine(path) {
             });
     });
 }
+
+module.exports = {
+    readFirstLine
+};

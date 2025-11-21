@@ -7,7 +7,7 @@ const bcrypt = require("bcrypt");
 const { readFirstLine } = require("../helpers/utils");
 const { verifyTokenAndExtractUser } = require('../helpers/authMiddleware');
 
-const db_2 = require('../models_2'); // Using models_2
+const db_2 = require('../models'); // Using models_2
 const User = db_2.User; // Using User from models_2
 
 auth_api.use(cors());
