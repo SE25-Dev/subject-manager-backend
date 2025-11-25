@@ -7,9 +7,9 @@ var app = express();
 const http = require("http").Server(app);
 var port = process.env.PORT || 3000;
 
-if ('JWT_SECRET' in process.env === false) {
-    console.error("Failed to load JWT_SECRET: Variable not set in environment.");
-    process.exit(1);
+if ("JWT_SECRET" in process.env === false) {
+  console.error("Failed to load JWT_SECRET: Variable not set in environment.");
+  process.exit(1);
 }
 
 app.use(cors());
@@ -31,5 +31,5 @@ app.use("/notifications", require("./routes/notifications"));
 app.use("/files", require("./routes/files"));
 
 http.listen(port, () => {
-    console.log("Server running on port:" + port);
+  console.log("Server running on port:" + port);
 });

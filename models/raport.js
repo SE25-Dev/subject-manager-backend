@@ -1,53 +1,57 @@
-const { DataTypes } = require('sequelize');
+const { DataTypes } = require("sequelize");
 
 module.exports = (sequelize) => {
-    const Raport = sequelize.define('Raport', {
-        id: {
-            type: DataTypes.INTEGER,
-            autoIncrement: true,
-            primaryKey: true,
+  const Raport = sequelize.define(
+    "Raport",
+    {
+      id: {
+        type: DataTypes.INTEGER,
+        autoIncrement: true,
+        primaryKey: true,
+      },
+      description: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+      },
+      classSessionId: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        references: {
+          model: "class_sessions",
+          key: "id",
         },
-        description: {
-            type: DataTypes.TEXT,
-            allowNull: true,
+      },
+      sectionId: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        references: {
+          model: "sections",
+          key: "id",
         },
-        classSessionId: {
-            type: DataTypes.INTEGER,
-            allowNull: false,
-            references: {
-                model: 'class_sessions',
-                key: 'id',
-            },
-        },
-        sectionId: {
-            type: DataTypes.INTEGER,
-            allowNull: false,
-            references: {
-                model: 'sections',
-                key: 'id',
-            },
-        },
-    }, {
-        tableName: 'raports',
-        timestamps: true,
+      },
+    },
+    {
+      tableName: "raports",
+      timestamps: true,
+    },
+  );
+
+  Raport.associate = (models) => {
+    Raport.belongsTo(models.ClassSession, {
+      foreignKey: "classSessionId",
+      as: "classSession",
+      onDelete: "CASCADE",
     });
+    Raport.belongsTo(models.Section, {
+      foreignKey: "sectionId",
+      as: "section",
+    });
+    Raport.belongsToMany(models.File, {
+      through: models.RaportFile,
+      foreignKey: "raportId",
+      as: "files",
+    });
+  };
 
-    Raport.associate = (models) => {
-        Raport.belongsTo(models.ClassSession, {
-            foreignKey: 'classSessionId',
-            as: 'classSession',
-            onDelete: 'CASCADE',
-        });
-        Raport.belongsTo(models.Section, {
-            foreignKey: 'sectionId',
-            as: 'section',
-        });
-        Raport.belongsToMany(models.File, {
-            through: models.RaportFile,
-            foreignKey: 'raportId',
-            as: 'files',
-        });
-    };
-
-    return Raport;
+  return Raport;
 };
