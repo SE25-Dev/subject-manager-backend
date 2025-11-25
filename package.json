@@ -1,8 +1,13 @@
 {
+  "name": "zmitac-backend",
+  "version": "0.9.0",
+  "description": "Backend for a Software Engineering application",
+  "license": "MPL-2.0",
   "dependencies": {
     "bcrypt": "^6.0.0",
     "body-parser": "^2.2.0",
     "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.0.2",
@@ -10,5 +15,8 @@
     "q": "^2.0.3",
     "sequelize": "^6.37.7",
     "sqlite3": "^5.1.7"
+  },
+  "scripts": {
+    "jwt-key": "echo JWT_SECRET=$(node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\")"
   }
 }
