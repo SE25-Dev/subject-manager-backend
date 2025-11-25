@@ -4,7 +4,6 @@ const auth_api = express.Router();
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
-const { readFirstLine } = require("../helpers/utils");
 const { verifyTokenAndExtractUser } = require('../helpers/authMiddleware');
 
 const db_2 = require('../models'); // Using models_2
@@ -13,8 +12,6 @@ const User = db_2.User; // Using User from models_2
 auth_api.use(cors());
 
 const blacklistedTokens = new Set();
-
-process.env.SECRET_KEY = readFirstLine("./keys/private_key.pub");
 
 const objectWithoutKey = (object, key) => {
     const { [key]: deletedKey, ...otherKeys } = object;
@@ -48,7 +45,7 @@ auth_api.post("/register", async (req, res) => {
             const newUser = await User.create(userData);
             let token = jwt.sign(
                 objectWithoutKey(newUser.dataValues, "password"),
-                process.env.SECRET_KEY,
+                process.env.JWT_SECRET,
                 {
                     expiresIn: "2h",
                 }
@@ -81,7 +78,7 @@ auth_api.post("/login", async (req, res) => {
             if (pass) {
                 let token = jwt.sign(
                     objectWithoutKey(user.dataValues, "password"),
-                    process.env.SECRET_KEY,
+                    process.env.JWT_SECRET,
                     {
                         expiresIn: "2h",
                     }
@@ -107,7 +104,7 @@ auth_api.post("/update_token", verifyTokenAndExtractUser, async (req, res) => {
         if (user) {
             let token = jwt.sign(
                 objectWithoutKey(user.dataValues, "password"),
-                process.env.SECRET_KEY,
+                process.env.JWT_SECRET,
                 {
                     expiresIn: 7200,
                 }

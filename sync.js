@@ -1,3 +1,4 @@
+require('dotenv').config();
 const db = require('./models');
 
 const SYNC_OPTIONS = { force: false };
@@ -14,6 +15,9 @@ async function syncDatabase() {
 
         await seedUserRoles();
         await seedStatuses();
+        if (process.env.NODE_ENV === 'development') {
+            await seedTestUser();
+        }
 
     } catch (error) {
         console.error('Unable to synchronize the database:', error);
@@ -47,9 +51,26 @@ async function seedStatuses() {
                 defaults: { name: statusName }
             });
         }
-        console.log("Statuses seeded successfully.");
+        console.log("Statuses seeded successfully.")
     } catch (err) {
         console.error("Error seeding statuses:", err);
+        throw err;
+    }
+}
+
+async function seedTestUser() {
+    const userData = {
+        "firstName": "Jon",
+        "lastName": "Snow",
+        "email": null,
+        "username": "testuser",
+        "password": "$2b$10$vp8H9wEMDSmZcQUkIBp8oeZgz8gvKGv3El8fZeFbPydJyxCLtssma" // "test"
+    };
+    try {
+        await db.User.findOrCreate({ where: { username: userData.username }, defaults: userData });
+        console.log("Test user seeded successfully.");
+    } catch (err) {
+        console.error("Error seeding test user:", err);
         throw err;
     }
 }
