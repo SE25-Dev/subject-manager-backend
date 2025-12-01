@@ -141,7 +141,7 @@ courses_router.post(
   "/course_creation_request",
   verifyTokenAndExtractUser,
   async (req, res) => {
-    const { title, description } = req.body;
+    const { title, description, coursePassword } = req.body;
     const requestedBy = req.user.id;
 
     if (!title) {
@@ -152,6 +152,7 @@ courses_router.post(
       const newRequest = await db.CourseCreationRequest.create({
         courseTitle: title,
         courseDescription: description,
+        coursePassword: coursePassword,
         requestedBy: requestedBy,
       });
 

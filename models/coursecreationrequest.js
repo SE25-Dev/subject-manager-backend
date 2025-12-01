@@ -17,6 +17,10 @@ module.exports = (sequelize) => {
         type: DataTypes.TEXT,
         allowNull: true,
       },
+      coursePassword: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+      },
       requestedBy: {
         type: DataTypes.INTEGER,
         allowNull: false,
