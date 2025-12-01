@@ -1,4 +1,5 @@
 require("dotenv").config();
+const bcrypt = require("bcryptjs");
 const db = require("./models");
 
 const SYNC_OPTIONS = { force: false };
@@ -20,6 +21,7 @@ async function syncDatabase() {
     if (process.env.NODE_ENV === "development") {
       await seedTestUser();
     }
+    await seedSuperUser();
   } catch (error) {
     console.error("Unable to synchronize the database:", error);
   } finally {
@@ -75,6 +77,28 @@ async function seedTestUser() {
     console.log("Test user seeded successfully.");
   } catch (err) {
     console.error("Error seeding test user:", err);
+    throw err;
+  }
+}
+
+async function seedSuperUser() {
+  const superuserPassword = await bcrypt.hash("superuser", 10);
+  const superUserData = {
+    firstName: "Super",
+    lastName: "User",
+    email: "superuser@example.com",
+    username: "superuser",
+    password: superuserPassword,
+    superuser: true,
+  };
+  try {
+    await db.User.findOrCreate({
+      where: { username: superUserData.username },
+      defaults: superUserData,
+    });
+    console.log("Superuser seeded successfully.");
+  } catch (err) {
+    console.error("Error seeding superuser:", err);
     throw err;
   }
 }
