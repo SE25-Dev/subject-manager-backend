@@ -205,6 +205,7 @@ courses_router.put(
         const newCourse = await Course.create({
           title: request.courseTitle,
           description: request.courseDescription,
+          password: request.coursePassword,
           statusId: (await Status.findOne({ where: { name: "Active" } })).id, // Assuming 'Active' status for new courses
         });
 
