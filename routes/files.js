@@ -55,13 +55,10 @@ files_router.post(
         type: req.file.mimetype,
       });
       res.json({
-        message: "File uploaded successfully",
-        file: {
           id: newFile.id,
           name: newFile.name,
           url: newFile.url,
           type: newFile.type,
-        },
       });
     } catch (error) {
       console.error("Error uploading file:", error);
@@ -70,45 +67,34 @@ files_router.post(
   },
 );
 
-/**
- * GET /download/:materialFileId
- * Downloads a file associated with a material, identified by MaterialFile ID.
- */
 files_router.get(
-  "/download/:materialFileId",
+  "/download/:fileId",
   verifyTokenAndExtractUser,
   async (req, res) => {
-    const materialFileId = req.params.materialFileId;
+    const fileId = req.params.fileId;
     const userId = req.user.id;
-    let courseId; // Declare courseId here
 
     try {
-      const materialFile = await db.MaterialFile.findByPk(materialFileId, {
+     
+      const file = await db.File.findByPk(fileId, {
         include: [
           {
-            model: Material,
-            as: "Material",
-            include: [
-              {
-                model: db.Course,
-                as: "course",
-              },
-            ],
-          },
-          {
-            model: File,
-            as: "File",
+            model: db.Material,
+            as: "materials",
+            include: [{ model: db.Course, as: "course" }],
           },
         ],
       });
 
-      if (!materialFile) {
-        return res.status(404).json({ error: "Material file not found." });
+      if (!file || file.materials.length === 0) {
+        return res.status(404).json({ error: "File or material not found." });
       }
 
-      courseId = materialFile.Material.course.id; // Assign value to declared courseId
+     
+      const material = file.materials[0];
+      const courseId = material.course.id;
 
-      // Check user's role in the course
+    
       const userCourseRole = await UserCourseRole.findOne({
         where: { userId, courseId },
         include: [{ model: UserRole, as: "role" }],
@@ -118,21 +104,17 @@ files_router.get(
 
       if (
         !userCourseRole ||
-        (!["headteacher", "teacher"].includes(userRoleName) &&
-          !materialFile.Material.visible)
+        (!["headteacher", "teacher"].includes(userRoleName) && !material.visible)
       ) {
-        return res
-          .status(403)
-          .json({
-            error:
-              "Access denied. Material is not visible or user has insufficient role.",
-          });
+        return res.status(403).json({
+          error: "Access denied. Material is not visible or user has insufficient role.",
+        });
       }
 
-      const filePath = path.join(__dirname, "..", materialFile.File.url);
+      const filePath = path.join(__dirname, "..", file.url);
 
       if (fs.existsSync(filePath)) {
-        res.download(filePath, materialFile.File.name);
+        res.download(filePath, file.name);
       } else {
         res.status(404).json({ error: "File not found on server." });
       }
@@ -140,96 +122,68 @@ files_router.get(
       console.error("Error downloading file:", error);
       res.status(500).json({ error: "Failed to download file." });
     }
-  },
+  }
 );
 
-/**
- * GET /download/:raportFileId
- * Downloads a file associated with a raport, identified by RaportFile ID.
- */
 files_router.get(
-  "/download/:raportFileId",
+  "/download-raport/:fileId",
   verifyTokenAndExtractUser,
   async (req, res) => {
-    const raportFileId = req.params.raportFileId;
+    const fileId = req.params.fileId;
     const userId = req.user.id;
 
     try {
-      const raportFile = await RaportFile.findByPk(raportFileId, {
+      // Find file and its raport association
+      const file = await db.File.findByPk(fileId, {
         include: [
           {
-            model: Raport,
-            as: "Raport",
+            model: db.Raport,
+            as: "raports",
             include: [
               {
-                model: Section,
-                as: "Section",
+                model: db.ClassSession,
+                as: "classSession",
+                include: [{ model: db.Course, as: "course" }],
               },
             ],
-          },
-          {
-            model: File,
-            as: "File",
           },
         ],
       });
 
-      if (!raportFile) {
-        return res.status(404).json({ error: "Raport file not found." });
+      if (!file || file.raports.length === 0) {
+        return res.status(404).json({ error: "File or raport not found." });
       }
 
-      const sectionId = raportFile.Raport.Section.id;
+      const raport = file.raports[0];
+      const courseId = raport.classSession.course.id;
 
-      // Check user's role in any course associated with this section
-      const courseSections = await CourseSection.findAll({
-        where: { sectionId: sectionId },
+      // Check user enrollment
+      const userCourseRole = await db.UserCourseRole.findOne({
+        where: { userId, courseId },
+        include: [{ model: db.UserRole, as: "role" }],
       });
 
-      let canDownload = false;
-      for (const cs of courseSections) {
-        const userCourseRole = await UserCourseRole.findOne({
-          where: { userId, courseId: cs.courseId },
-          include: [{ model: UserRole, as: "role" }],
+      if (!userCourseRole) {
+        return res.status(403).json({
+          error: "Access denied. User not enrolled in this course.",
         });
-
-        if (
-          userCourseRole &&
-          (userCourseRole.role.name === "headteacher" ||
-            userCourseRole.role.name === "teacher")
-        ) {
-          canDownload = true;
-          break;
-        }
       }
 
-      if (!canDownload) {
-        // If not headteacher/teacher, check if user is directly associated with the section
-        const userSection = await UserSection.findOne({
-          where: { userId, sectionId },
-        });
+      // Optional: you can add further checks (e.g., only headteacher/teacher can download all raports)
 
-        if (!userSection) {
-          return res
-            .status(403)
-            .json({
-              error:
-                "Access denied. User has insufficient role or is not associated with this section.",
-            });
-        }
-      }
-
-      const filePath = path.join(__dirname, "..", raportFile.File.url);
+      const filePath = path.join(__dirname, "..", file.url);
 
       if (fs.existsSync(filePath)) {
-        res.download(filePath, raportFile.File.name);
+        return res.download(filePath, file.name);
       } else {
-        res.status(404).json({ error: "File not found on server." });
+        return res.status(404).json({ error: "File not found on server." });
       }
     } catch (error) {
       console.error("Error downloading raport file:", error);
-      res.status(500).json({ error: "Failed to download raport file." });
+      res.status(500).json({ error: "Failed to download file." });
     }
-  },
+  }
 );
+
 
 module.exports = files_router;

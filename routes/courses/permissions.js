@@ -22,7 +22,6 @@ permissions_router.use(express.json());
 permissions_router.get(
   "/:courseId/users",
   verifyTokenAndExtractUser,
-  checkRole(["headteacher"]),
   async (req, res) => {
     const courseId = req.params.courseId;
 
@@ -66,28 +65,37 @@ permissions_router.put(
   verifyTokenAndExtractUser,
   checkRole(["headteacher"]),
   async (req, res) => {
-    const courseId = req.params.courseId;
-    const targetUserId = req.params.userId;
-    const { newRoleId } = req.body;
+    const { courseId, userId: targetUserId } = req.params;
+    const { newRole } = req.body; // string: 'student', 'teacher', 'headteacher'
 
-    if (!newRoleId) {
-      return res.status(400).json({ error: "New role ID is required." });
+    if (!newRole) {
+      console.log("erorr1");
+      return res.status(400).json({ error: "New role is required." });
     }
 
     try {
+      // Find the role by name
+      const roleRecord = await UserRole.findOne({ where: { name: newRole } });
+      if (!roleRecord) {
+        console.log("2");
+        return res.status(400).json({ error: "Invalid role name." });
+      }
+
       const userCourseRole = await UserCourseRole.findOne({
         where: { userId: targetUserId, courseId },
       });
 
       if (!userCourseRole) {
-        return res
-          .status(404)
-          .json({ error: "User not found in this course." });
+        return res.status(404).json({ error: "User not found in this course." });
       }
 
-      await userCourseRole.update({ roleId: newRoleId });
+      await userCourseRole.update({ roleId: roleRecord.id });
 
-      res.json({ message: "User role updated successfully." });
+      res.json({
+        message: "User role updated successfully.",
+        role: newRole,
+        userCourseRole,
+      });
     } catch (error) {
       console.error("Error updating user role:", error);
       res.status(500).json({ error: "Failed to update user role." });

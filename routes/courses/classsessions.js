@@ -96,14 +96,14 @@ class_sessions_router.post(
   verifyTokenAndExtractUser,
   checkRole(["headteacher", "teacher"]),
   async (req, res) => {
-    const { courseId, topic, startingDateTime, endingDateTime } = req.body;
+    const { courseId, topic, startingDateTime, endingDateTime, visible } = req.body;
     const userId = req.user.id; // The user creating the session (e.g., teacher)
 
     if (!courseId || !topic || !startingDateTime || !endingDateTime) {
       return res
         .status(400)
         .json({
-          error: "Course ID, topic, starting and ending times are required.",
+          error: "Course ID, topic, starting and ending times, visibility are required.",
         });
     }
 
@@ -113,6 +113,7 @@ class_sessions_router.post(
         topic,
         startingDateTime,
         endingDateTime,
+        visible,
       });
 
       // Get all students enrolled in the course
@@ -157,11 +158,10 @@ class_sessions_router.post(
       await Presence.bulkCreate(presenceToCreate);
 
       res.status(201).json({
-        message:
-          "Class session created, assessments and presence initialized for students.",
         classSession: newClassSession,
         assessmentsCreated: assessmentsToCreate.length,
         presenceRecordsCreated: presenceToCreate.length,
+        visible: visible,
       });
     } catch (error) {
       console.error("Error creating class session and assessments:", error);
@@ -174,31 +174,25 @@ class_sessions_router.post(
 
 /**
  * POST /:classSessionId/submit_raport
- * Body: { description, userIds[], files[] }
- * Allows a student to submit a raport for a class session, creating a section,
- * associating users, creating notifications, and handling file uploads.
+ * Body: { description, userIds[], fileIds[] }
+ * Files are already uploaded; only their IDs are sent.
  */
 class_sessions_router.post(
   "/:classSessionId/submit_raport",
   verifyTokenAndExtractUser,
-  checkRole(["student"]),
-  upload.array("files"),
   async (req, res) => {
     const classSessionId = req.params.classSessionId;
-    const { description, userIds } = req.body;
+    const { description, userIds, fileIds } = req.body; // now expecting fileIds
     const submittingUserId = req.user.id;
-    const uploadedFiles = req.files;
-
+  console.log(classSessionId);
     if (!classSessionId) {
       return res.status(400).json({ error: "Class Session ID is required." });
     }
+   
     if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
       return res
         .status(400)
-        .json({
-          error:
-            "At least one user ID (including the submitting user) is required for the raport.",
-        });
+        .json({ error: "At least one user ID is required for the raport." });
     }
 
     try {
@@ -210,20 +204,11 @@ class_sessions_router.post(
       }
 
       // Create a new Section with 'Pending' status
-      const pendingStatus = await Status.findOne({
-        where: { name: "Pending" },
-      });
-      if (!pendingStatus) {
-        return res
-          .status(500)
-          .json({
-            error:
-              "Pending status not found. Please ensure statuses are seeded.",
-          });
-      }
+      const pendingStatus = await Status.findOne({ where: { name: "Pending" } });
+      if (!pendingStatus) throw new Error("Pending status not found");
 
       const newSection = await Section.create({
-        name: `Raport Section for Class Session ${classSessionId} by User ${submittingUserId}`, // Dynamic name
+        name: `Raport Section for Class Session ${classSessionId} by User ${submittingUserId}`,
         statusId: pendingStatus.id,
       });
 
@@ -236,23 +221,16 @@ class_sessions_router.post(
 
       // Create the Raport
       const newRaport = await Raport.create({
-        description: description,
-        classSessionId: classSessionId,
+        description,
+        classSessionId,
         sectionId: newSection.id,
       });
 
-      // Handle file uploads
-      if (uploadedFiles && uploadedFiles.length > 0) {
-        const filesToCreate = uploadedFiles.map((file) => ({
-          name: file.originalname,
-          type: file.mimetype,
-          url: file.path, // Store the path where multer saved the file
-        }));
-        const createdFiles = await File.bulkCreate(filesToCreate);
-
-        const raportFilesToCreate = createdFiles.map((file) => ({
+      // Associate already uploaded files (fileIds)
+      if (fileIds && Array.isArray(fileIds) && fileIds.length > 0) {
+        const raportFilesToCreate = fileIds.map((fileId) => ({
           raportId: newRaport.id,
-          fileId: file.id,
+          fileId: fileId,
         }));
         await RaportFile.bulkCreate(raportFilesToCreate);
       }
@@ -264,7 +242,7 @@ class_sessions_router.post(
         message: `You have been added to a section in course '${classSession.course.title}' for the class '${classSession.topic}'.`,
         type: "raport_section_addition",
         isRead: false,
-        sectionId: newSection.id, // Add sectionId here
+        sectionId: newSection.id,
       }));
       await Notification.bulkCreate(notificationsToCreate);
 
@@ -277,14 +255,6 @@ class_sessions_router.post(
       });
     } catch (error) {
       console.error("Error submitting raport:", error);
-      // Clean up uploaded files if an error occurs
-      if (uploadedFiles && uploadedFiles.length > 0) {
-        uploadedFiles.forEach((file) => {
-          fs.unlink(file.path, (err) => {
-            if (err) console.error("Error deleting uploaded file:", err);
-          });
-        });
-      }
       res.status(500).json({ error: "Failed to submit raport." });
     }
   },
@@ -353,5 +323,104 @@ class_sessions_router.put(
     }
   },
 );
+/**
+ * GET /:courseId/classsessions/my_raports
+ * Returns all class sessions for a course, each including the current user's raport (only files, no section).
+ */
+class_sessions_router.get(
+  "/:courseId/classsessions",
+  verifyTokenAndExtractUser,
+  async (req, res) => {
+    const { courseId } = req.params;
+    const userId = req.user.id;
+
+    if (!courseId) {
+      return res.status(400).json({ error: "Course ID is required." });
+    }
+
+    try {
+      const userCourseRole = await UserCourseRole.findOne({
+        where: { userId, courseId },
+        include: [{ model: UserRole, as: "role" }],
+      });
+
+      if (!userCourseRole) {
+        return res
+          .status(403)
+          .json({ error: "Access denied. User not enrolled in this course." });
+      }
+
+      const userRoleName = userCourseRole.role.name;
+      let whereClause = { courseId: courseId };
+
+      if (userRoleName === "student") {
+        whereClause.visible = true; 
+      }
+
+      const classSessions = await ClassSession.findAll({
+        where: whereClause,
+        order: [["startingDateTime", "ASC"]],
+      });
+
+      const sessionIds = classSessions.map((s) => s.id);
+
+      const raports = await Raport.findAll({
+        where: { classSessionId: sessionIds },
+        include: [
+          {
+            model: Section,
+            as: "section",
+            include: [
+              {
+                model: User,
+                as: "users",
+                attributes: ["id"],
+                through: { attributes: [] },
+              },
+            ],
+          },
+          {
+            model: File,
+            as: "files",
+          },
+        ],
+      });
+
+      // Map raport to its class session, filtering only those including the current user
+      const sessionsWithRaports = classSessions.map((session) => {
+        const myRaport = raports.find(
+          (r) =>
+            r.classSessionId === session.id &&
+            r.section.users.some((u) => u.id === userId)
+        );
+
+        const raportForFrontend = myRaport
+          ? {
+              id: myRaport.id,
+              description: myRaport.description,
+              classSessionId: myRaport.classSessionId,
+              sectionId: myRaport.sectionId,
+              createdAt: myRaport.createdAt,
+              updatedAt: myRaport.updatedAt,
+              files: myRaport.files || [],
+            }
+          : null;
+
+        return {
+          ...session.toJSON(),
+          raport: raportForFrontend,
+        };
+      });
+
+      res.status(200).json(sessionsWithRaports);
+    } catch (error) {
+      console.error("Error fetching class sessions with raports:", error);
+      res
+        .status(500)
+        .json({ error: "Failed to retrieve class sessions with raports." });
+    }
+  }
+);
+
 
 module.exports = class_sessions_router;

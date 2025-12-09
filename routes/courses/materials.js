@@ -80,8 +80,7 @@ materials_router.get(
           {
             model: File,
             as: "files",
-            attributes: ["id", "name", "type"],
-            through: { attributes: ["id"] }, // Include MaterialFile ID
+            attributes: ["id", "name", "url", "type"],
           },
         ],
         order: [["index", "ASC"]],
@@ -169,25 +168,39 @@ materials_router.delete(
         return res.status(404).json({ error: "Material not found." });
       }
 
-      // Delete associated files from the file system and database
-      for (const file of material.files) {
-        const filePath = path.join(
-          __dirname,
-          "../../uploads",
-          file.MaterialFile.filename,
-        ); // Assuming filename is stored in MaterialFile or File.url
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath); // Delete file from disk
+      // Delete associated MaterialFile entries
+      const materialFilesToDelete = await db.MaterialFile.findAll({
+        where: { materialId: materialId },
+      });
+
+      for (const mf of materialFilesToDelete) {
+        const fileId = mf.fileId;
+        await mf.destroy(); // Delete the MaterialFile association
+
+        // Check if the file is still associated with any other material or raport
+        const otherMaterialAssociations = await db.MaterialFile.count({
+          where: { fileId: fileId },
+        });
+        const raportAssociations = await db.RaportFile.count({
+          where: { fileId: fileId },
+        });
+
+        if (otherMaterialAssociations === 0 && raportAssociations === 0) {
+          // If no other associations, delete the file from database and disk
+          const fileToDelete = await File.findByPk(fileId);
+          if (fileToDelete) {
+            const filePath = path.join(__dirname, "../..", fileToDelete.url);
+            if (fs.existsSync(filePath)) {
+              fs.unlinkSync(filePath); // Delete file from disk
+            }
+            await fileToDelete.destroy(); // Delete file record from DB
+          }
         }
-        await db.MaterialFile.destroy({ where: { id: file.MaterialFile.id } });
-        await File.destroy({ where: { id: file.id } });
       }
 
       await material.destroy(); // Delete the material itself
 
-      res.json({
-        message: "Material and associated files deleted successfully.",
-      });
+      res.json({ message: "Material and associated files deleted successfully." });
     } catch (error) {
       console.error("Error deleting material:", error);
       res.status(500).json({ error: "Failed to delete material." });
@@ -236,12 +249,23 @@ materials_router.put(
           if (materialFile) {
             // No need to delete from disk here, as files are managed by /routes/files.js
             await materialFile.destroy(); // Delete association
-            // Optionally, delete the file record if it's no longer associated with any material
-            const otherAssociations = await MaterialFile.count({
+            // Check if the file is still associated with any other material or raport
+            const otherMaterialAssociations = await db.MaterialFile.count({
+              where: { fileId: fileId, materialId: { [Op.ne]: material.id } }, // Exclude current material
+            });
+            const raportAssociations = await db.RaportFile.count({
               where: { fileId: fileId },
             });
-            if (otherAssociations === 0) {
-              await File.destroy({ where: { id: fileId } });
+
+            if (otherMaterialAssociations === 0 && raportAssociations === 0) {
+              const fileToDelete = await File.findByPk(fileId);
+              if (fileToDelete) {
+                const filePath = path.join(__dirname, "../..", fileToDelete.url);
+                if (fs.existsSync(filePath)) {
+                  fs.unlinkSync(filePath);
+                }
+                await fileToDelete.destroy();
+              }
             }
           }
         }

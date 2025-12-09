@@ -30,15 +30,64 @@ courses_router.get("/", verifyTokenAndExtractUser, async (req, res) => {
     const courses = await Course.findAll({
       attributes: ["id", "title", "description"],
     });
-    res.json(courses);
+
+    const coursesWithTeachers = await Promise.all(
+      courses.map(async (course) => {
+        const teacherRoles = await UserCourseRole.findAll({
+          where: { courseId: course.id },
+          include: [
+            {
+              model: User,
+              as: "user", // alias from model
+              attributes: ["id", "firstName", "lastName", "username", "email"],
+            },
+            {
+              model: UserRole,
+              as: "role", // alias from model
+              attributes: ["name"],
+            },
+          ],
+        });
+
+        const teachers = teacherRoles
+          .filter(
+            (ucr) =>
+              ucr.role.name === "headteacher" || ucr.role.name === "teacher"
+          )
+          .sort((a, b) => {
+            if (a.role.name === "headteacher") return -1;
+            if (b.role.name === "headteacher") return 1;
+            return 0;
+          })
+          .map((ucr) => ({
+            id: ucr.user.id,
+            firstName: ucr.user.firstName,
+            lastName: ucr.user.lastName,
+            username: ucr.user.username,
+            email: ucr.user.email,
+            role: ucr.role.name,
+          }));
+
+        return {
+          id: course.id,
+          title: course.title,
+          description: course.description,
+          teachers,
+        };
+      })
+    );
+
+    res.json(coursesWithTeachers);
   } catch (error) {
-    console.error("Error fetching courses:", error);
-    res.status(500).json({ error: "Failed to fetch courses." });
+    console.error("Error fetching courses with teachers:", error);
+    res
+      .status(500)
+      .json({ error: "Failed to fetch courses with teacher info." });
   }
 });
 
 /**
- * POST /enroll_course
+ * POST /enroll
  * Body: { jwt, courseId, password }
  * Enrolls a user in a course if the password is correct and assigns 'student' role.
  */
@@ -131,6 +180,28 @@ courses_router.post(
     }
   },
 );
+
+/**
+ * GET /my_courses
+ * Returns a list of course IDs the authenticated user is enrolled in.
+ */
+courses_router.get("/my_courses", verifyTokenAndExtractUser, async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const roles = await db.UserCourseRole.findAll({
+      where: { userId: userId },
+      attributes: ["courseId"]
+    });
+
+    const courseIds = roles.map(r => Number(r.courseId));
+
+    res.json(courseIds);
+  } catch (error) {
+    console.error("Error fetching user courses:", error);
+    res.status(500).json({ error: "Failed to fetch user course list." });
+  }
+});
 
 /**
  * POST /request_course_creation
