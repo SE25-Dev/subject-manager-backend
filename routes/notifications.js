@@ -19,7 +19,7 @@ notifications_router.use(express.json());
  * Query Params: { isRead } (optional, filters by read status)
  */
 notifications_router.get(
-  "/notifications",
+  "/",
   verifyTokenAndExtractUser,
   async (req, res) => {
     const userId = req.user.id;
@@ -44,17 +44,17 @@ notifications_router.get(
     }
   },
 );
-
 /**
  * PUT /notifications/:notificationId/mark_as_read
- * Marks a specific notification as read.
+ * Body: { action: 'accept' | 'deny' } (Optional, defaults to accept behavior if missing)
  */
 notifications_router.put(
-  "/notifications/:notificationId/mark_as_read",
+  "/:notificationId/mark_as_read",
   verifyTokenAndExtractUser,
   async (req, res) => {
     const notificationId = req.params.notificationId;
     const userId = req.user.id;
+    const { action } = req.body; // New: Extract action
 
     try {
       const notification = await Notification.findOne({
@@ -62,73 +62,80 @@ notifications_router.put(
       });
 
       if (!notification) {
-        return res
-          .status(404)
-          .json({
-            error:
-              "Notification not found or you don't have permission to update it.",
-          });
+        return res.status(404).json({
+          error: "Notification not found or permission denied.",
+        });
       }
+
+      // --- NEW LOGIC: Handle Denial ---
+      if (notification.type === "raport_section_addition" && action === "deny") {
+        if (notification.sectionId) {
+          // Remove the user from the section
+          await UserSection.destroy({
+            where: {
+              userId: userId,
+              sectionId: notification.sectionId,
+            },
+          });
+          console.log(`User ${userId} removed from section ${notification.sectionId} due to denial.`);
+        }
+      }
+      // -------------------------------
 
       notification.isRead = true;
       await notification.save();
 
       if (notification.type === "raport_section_addition") {
-        // Check if all notifications for this section are read
         const sectionId = notification.sectionId;
         if (sectionId) {
+          // Check if ALL notifications for this section are now read
           const allSectionNotifications = await Notification.findAll({
             where: { sectionId: sectionId },
           });
 
-          const allRead = allSectionNotifications.every(
-            (notif) => notif.isRead,
-          );
+          const allRead = allSectionNotifications.every((notif) => notif.isRead);
 
           if (allRead) {
             // Update section status to 'Active'
-            const activeStatus = await Status.findOne({
-              where: { name: "Active" },
-            });
+            const activeStatus = await Status.findOne({ where: { name: "Active" } });
+            
             if (activeStatus) {
               await Section.update(
                 { statusId: activeStatus.id },
-                { where: { id: sectionId } },
+                { where: { id: sectionId } }
               );
             }
 
-            // Delete all notifications for this section
+            // Cleanup: Delete all notifications for this section
             await Notification.destroy({ where: { sectionId: sectionId } });
-            return res
-              .status(200)
-              .json({
-                message:
-                  "All section notifications marked as read, section activated, and notifications deleted.",
-                sectionId: sectionId,
-              });
+
+            return res.status(200).json({
+              message: "Notification handled. Section activated.",
+              sectionId: sectionId,
+              actionPerformed: action || 'read'
+            });
           }
         }
       } else {
+        // Standard notification (Info/Alert) - Delete after reading
         await notification.destroy();
-        return res
-          .status(200)
-          .json({
-            message: "Notification marked as read and deleted.",
-            notificationId: notificationId,
-          });
+        return res.status(200).json({
+          message: "Notification read and deleted.",
+          notificationId: notificationId,
+        });
       }
 
-      res
-        .status(200)
-        .json({
-          message: "Notification marked as read.",
-          notification: notification,
-        });
+      // If we get here, it means we read the notif, but other people in the section haven't read theirs yet.
+      res.status(200).json({
+        message: "Notification marked as read.",
+        notification: notification,
+      });
+      
     } catch (error) {
       console.error("Error marking notification as read:", error);
       res.status(500).json({ error: "Failed to mark notification as read." });
     }
-  },
+  }
 );
 
 module.exports = notifications_router;

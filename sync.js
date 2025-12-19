@@ -2,7 +2,7 @@ require("dotenv").config();
 const bcrypt = require("bcryptjs");
 const db = require("./models");
 
-const SYNC_OPTIONS = { force: false };
+const SYNC_OPTIONS = { alter: true };
 
 async function syncDatabase() {
   try {

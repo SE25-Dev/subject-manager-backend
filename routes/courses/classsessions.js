@@ -21,6 +21,7 @@ const Notification = db.Notification;
 const Status = db.Status;
 const File = db.File;
 const RaportFile = db.RaportFile;
+const MaterialFile = db.MaterialFile;
 
 const path = require("path");
 const fs = require("fs");
@@ -184,7 +185,7 @@ class_sessions_router.post(
     const classSessionId = req.params.classSessionId;
     const { description, userIds, fileIds } = req.body; // now expecting fileIds
     const submittingUserId = req.user.id;
-  console.log(classSessionId);
+
     if (!classSessionId) {
       return res.status(400).json({ error: "Class Session ID is required." });
     }
@@ -224,6 +225,7 @@ class_sessions_router.post(
         description,
         classSessionId,
         sectionId: newSection.id,
+        userId: submittingUserId,
       });
 
       // Associate already uploaded files (fileIds)
@@ -239,7 +241,7 @@ class_sessions_router.post(
       const otherUserIds = userIds.filter((id) => id !== submittingUserId);
       const notificationsToCreate = otherUserIds.map((id) => ({
         userId: id,
-        message: `You have been added to a section in course '${classSession.course.title}' for the class '${classSession.topic}'.`,
+        message: `You have been invited to join the section in course '${classSession.course.title}'. Do you accept?`,
         type: "raport_section_addition",
         isRead: false,
         sectionId: newSection.id,
@@ -248,7 +250,7 @@ class_sessions_router.post(
 
       res.status(201).json({
         message:
-          "Raport submitted successfully, section created, and notifications sent.",
+        "Raport submitted successfully, section created, and notifications sent.",
         raport: newRaport,
         section: newSection,
         notificationsSent: notificationsToCreate.length,
@@ -262,70 +264,91 @@ class_sessions_router.post(
 
 /**
  * PUT /:raportId/edit_raport
- * Body: { description, deletedFileIds[], newFiles[] }
- * Allows a raport owner to edit the raport's description and manage associated files.
+ * Body: { description, deletedFileIds[], newFileIds[] }
  */
 class_sessions_router.put(
   "/:raportId/edit_raport",
   verifyTokenAndExtractUser,
-  checkRole(["student", "teacher", "headteacher"]),
   checkRaportOwner,
   async (req, res) => {
     const raportId = req.params.raportId;
-    const { description, deletedFilesId, newFilesId } = req.body;
-    const raport = req.raport; // Raport object attached by checkRaportOwner middleware
+    const { description, deletedFileIds, newFileIds } = req.body;
+    const raport = req.raport;
 
     try {
-      // Update raport description if provided
       if (description !== undefined) {
         raport.description = description;
         await raport.save();
       }
 
-      // Handle file deletions
-      if (
-        deletedFilesId &&
-        Array.isArray(deletedFilesId) &&
-        deletedFilesId.length > 0
-      ) {
-        for (const fileId of deletedFilesId) {
+      // 2. Handle File Deletions
+      if (deletedFileIds && Array.isArray(deletedFileIds) && deletedFileIds.length > 0) {
+        for (const fileId of deletedFileIds) {
+          
+          // Remove the link between Raport and File
           const raportFile = await RaportFile.findOne({
             where: { raportId: raport.id, fileId: fileId },
           });
+
           if (raportFile) {
-            await raportFile.destroy(); // Delete association
-            // Optionally, delete the file record if it's no longer associated with any raport
-            const otherAssociations = await RaportFile.count({
+            await raportFile.destroy(); // Link removed
+
+            // FIX 2: SAFETY CHECK
+            // Before deleting the actual file from disk, ensure NO OTHER Raport OR Material uses it.
+            
+            const otherRaportAssociations = await RaportFile.count({
               where: { fileId: fileId },
             });
-            if (otherAssociations === 0) {
-              await File.destroy({ where: { id: fileId } });
+            
+            const materialAssociations = await MaterialFile.count({
+              where: { fileId: fileId },
+            });
+
+            // Only delete if it is truly an orphan (0 usage)
+            if (otherRaportAssociations === 0 && materialAssociations === 0) {
+              const fileToDelete = await File.findByPk(fileId);
+              if (fileToDelete) {
+                const filePath = path.join(__dirname, "../../", fileToDelete.url); // Adjust path based on your folder structure
+                if (fs.existsSync(filePath)) {
+                  fs.unlinkSync(filePath);
+                }
+                await fileToDelete.destroy();
+              }
             }
           }
         }
       }
 
-      // Handle new file associations
-      if (newFilesId && Array.isArray(newFilesId) && newFilesId.length > 0) {
-        const raportFilesToCreate = newFilesId.map((fileId) => ({
+      // 3. Handle New File Associations
+      if (newFileIds && Array.isArray(newFileIds) && newFileIds.length > 0) {
+        const raportFilesToCreate = newFileIds.map((fileId) => ({
           raportId: raport.id,
           fileId: fileId,
         }));
         await RaportFile.bulkCreate(raportFilesToCreate);
       }
 
-      res
-        .status(200)
-        .json({ message: "Raport updated successfully.", raport: raport });
+      // Refresh raport to return updated data (optional but good for frontend)
+      await raport.reload(); 
+
+      res.status(200).json({ 
+        message: "Raport updated successfully.", 
+        raport: raport 
+      });
+
     } catch (error) {
       console.error("Error editing raport:", error);
       res.status(500).json({ error: "Failed to edit raport." });
     }
   },
 );
+
 /**
- * GET /:courseId/classsessions/my_raports
- * Returns all class sessions for a course, each including the current user's raport (only files, no section).
+ * GET /:courseId/classsessions
+ * Returns all class sessions for a course.
+ * Includes the current user's raport if:
+ * 1. They are in the section AND the section is 'Active'.
+ * 2. OR they are the OWNER of the raport (even if 'Pending').
  */
 class_sessions_router.get(
   "/:courseId/classsessions",
@@ -339,6 +362,7 @@ class_sessions_router.get(
     }
 
     try {
+      // 1. Check User Enrollment
       const userCourseRole = await UserCourseRole.findOne({
         where: { userId, courseId },
         include: [{ model: UserRole, as: "role" }],
@@ -351,12 +375,14 @@ class_sessions_router.get(
       }
 
       const userRoleName = userCourseRole.role.name;
+      
+      // 2. Determine Class Session Visibility
       let whereClause = { courseId: courseId };
-
       if (userRoleName === "student") {
-        whereClause.visible = true; 
+        whereClause.visible = true;
       }
 
+      // 3. Fetch Class Sessions
       const classSessions = await ClassSession.findAll({
         where: whereClause,
         order: [["startingDateTime", "ASC"]],
@@ -364,6 +390,7 @@ class_sessions_router.get(
 
       const sessionIds = classSessions.map((s) => s.id);
 
+      // 4. Fetch Raports with Section, Status, and Section Users
       const raports = await Raport.findAll({
         where: { classSessionId: sessionIds },
         include: [
@@ -372,9 +399,13 @@ class_sessions_router.get(
             as: "section",
             include: [
               {
+                model: Status, // Include Status to check for 'Active'/'Pending'
+                as: "status",
+              },
+              {
                 model: User,
                 as: "users",
-                attributes: ["id"],
+                attributes: ["id", "firstName", "lastName", "username"], // Fetch user details
                 through: { attributes: [] },
               },
             ],
@@ -386,25 +417,50 @@ class_sessions_router.get(
         ],
       });
 
-      // Map raport to its class session, filtering only those including the current user
+      // 5. Map and Filter
       const sessionsWithRaports = classSessions.map((session) => {
-        const myRaport = raports.find(
-          (r) =>
-            r.classSessionId === session.id &&
-            r.section.users.some((u) => u.id === userId)
-        );
+        
+        // Find a raport for this session where the current user is a member
+        const myRaport = raports.find((r) => {
+          // A. Is the user in this section?
+          const isMember = r.section.users.some((u) => u.id === userId);
+          if (!isMember) return false;
 
-        const raportForFrontend = myRaport
-          ? {
-              id: myRaport.id,
-              description: myRaport.description,
-              classSessionId: myRaport.classSessionId,
-              sectionId: myRaport.sectionId,
-              createdAt: myRaport.createdAt,
-              updatedAt: myRaport.updatedAt,
-              files: myRaport.files || [],
-            }
-          : null;
+          // B. Is the user the owner (author)?
+          // Note: r.userId comes from the Raport model definition you provided
+          const isOwner = r.userId === userId; 
+
+          // C. Is the section Active?
+          // Guard clause in case status is missing for some reason
+          const statusName = r.section.status ? r.section.status.name : "";
+          const isActive = statusName === "Active";
+
+          // LOGIC: Show if Active OR (Pending AND isOwner)
+          return isActive || isOwner;
+        });
+
+        // Format the raport for frontend if found
+        let raportForFrontend = null;
+        
+        if (myRaport) {
+          raportForFrontend = {
+            id: myRaport.id,
+            description: myRaport.description,
+            classSessionId: myRaport.classSessionId,
+            sectionId: myRaport.sectionId,
+            createdAt: myRaport.createdAt,
+            updatedAt: myRaport.updatedAt,
+            files: myRaport.files || [],
+            // Include full section info (Status + Users)
+            section: {
+              id: myRaport.section.id,
+              name: myRaport.section.name,
+              statusId: myRaport.section.statusId,
+              status: myRaport.section.status, // Contains { id, name: "Pending" }
+              users: myRaport.section.users,   // Contains [{ id, firstName... }]
+            },
+          };
+        }
 
         return {
           ...session.toJSON(),

@@ -66,36 +66,55 @@ permissions_router.put(
   checkRole(["headteacher"]),
   async (req, res) => {
     const { courseId, userId: targetUserId } = req.params;
-    const { newRole } = req.body; // string: 'student', 'teacher', 'headteacher'
+    const { newRole } = req.body;
 
     if (!newRole) {
-      console.log("erorr1");
       return res.status(400).json({ error: "New role is required." });
     }
 
     try {
-      // Find the role by name
-      const roleRecord = await UserRole.findOne({ where: { name: newRole } });
-      if (!roleRecord) {
-        console.log("2");
+      const newRoleRecord = await UserRole.findOne({ where: { name: newRole } });
+      if (!newRoleRecord) {
         return res.status(400).json({ error: "Invalid role name." });
       }
 
       const userCourseRole = await UserCourseRole.findOne({
         where: { userId: targetUserId, courseId },
+        include: [{ model: UserRole, as: 'role' }] 
       });
 
       if (!userCourseRole) {
         return res.status(404).json({ error: "User not found in this course." });
       }
 
-      await userCourseRole.update({ roleId: roleRecord.id });
+      const currentRoleName = userCourseRole.role.name;
+      
+    
+      if (currentRoleName === 'headteacher' && newRole !== 'headteacher') {
+        
+        // Count how many headteachers exist in this specific course
+        const headteacherRole = await UserRole.findOne({ where: { name: 'headteacher' } });
+        const headteacherCount = await UserCourseRole.count({
+          where: {
+            courseId: courseId,
+            roleId: headteacherRole.id
+          }
+        });
+
+        if (headteacherCount <= 1) {
+          return res.status(403).json({ 
+            error: "Cannot change role. This user is the only HeadTeacher in the course." 
+          });
+        }
+      }
+      await userCourseRole.update({ roleId: newRoleRecord.id });
 
       res.json({
         message: "User role updated successfully.",
         role: newRole,
         userCourseRole,
       });
+
     } catch (error) {
       console.error("Error updating user role:", error);
       res.status(500).json({ error: "Failed to update user role." });
