@@ -5,6 +5,7 @@ To run the project:
 1. Copy .env.example to .env and fill in the required secret
 
 ```
+$ npm install
 $ cp .env.example .env
 $ npm run --silent jwt-key (Put it into the .env file)
 ```
