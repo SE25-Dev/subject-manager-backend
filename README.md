@@ -15,7 +15,7 @@ $ npm run --silent jwt-key (Put it into the .env file)
 $ node sync
 ```
 
-If `NODE_ENV` is set to `development` a test user will be created. username: `testuser` password: `test`
+If `NODE_ENV` is set to `development` a test user will be created. username: `testuser` password: `test`, as well as the super user will be created username: `superuser` password: `superuser` 
 
 3. Run the server
 
