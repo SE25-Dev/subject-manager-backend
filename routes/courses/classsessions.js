@@ -183,13 +183,13 @@ class_sessions_router.post(
   verifyTokenAndExtractUser,
   async (req, res) => {
     const classSessionId = req.params.classSessionId;
-    const { description, userIds, fileIds } = req.body; // now expecting fileIds
+    const { description, userIds, fileIds } = req.body;
     const submittingUserId = req.user.id;
 
     if (!classSessionId) {
       return res.status(400).json({ error: "Class Session ID is required." });
     }
-   
+
     if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
       return res
         .status(400)
@@ -204,13 +204,21 @@ class_sessions_router.post(
         return res.status(404).json({ error: "Class session not found." });
       }
 
-      // Create a new Section with 'Pending' status
-      const pendingStatus = await Status.findOne({ where: { name: "Pending" } });
-      if (!pendingStatus) throw new Error("Pending status not found");
+
+      const submittingUser = await db.User.findByPk(submittingUserId);
+      if (!submittingUser) {
+        return res.status(404).json({ error: "Submitting user not found." });
+      }
+
+      // Determine status: "Active" if single user, "Pending" if multiple users
+      const targetStatusName = userIds.length === 1 ? "Active" : "Pending";
+      
+      const status = await Status.findOne({ where: { name: targetStatusName } });
+      if (!status) throw new Error(`${targetStatusName} status not found`);
 
       const newSection = await Section.create({
-        name: `Raport Section for Class Session ${classSessionId} by User ${submittingUserId}`,
-        statusId: pendingStatus.id,
+        name: `Raport Section for ${classSession.topic} by ${submittingUser.firstName} ${submittingUser.lastName}`,
+        statusId: status.id,
       });
 
       // Associate all specified users with the new Section
@@ -237,20 +245,23 @@ class_sessions_router.post(
         await RaportFile.bulkCreate(raportFilesToCreate);
       }
 
-      // Create notifications for other users in the raport
       const otherUserIds = userIds.filter((id) => id !== submittingUserId);
-      const notificationsToCreate = otherUserIds.map((id) => ({
-        userId: id,
-        message: `You have been invited to join the section in course '${classSession.course.title}'. Do you accept?`,
-        type: "raport_section_addition",
-        isRead: false,
-        sectionId: newSection.id,
-      }));
-      await Notification.bulkCreate(notificationsToCreate);
+      
+      let notificationsToCreate = [];
+      if (otherUserIds.length > 0) {
+          notificationsToCreate = otherUserIds.map((id) => ({
+            userId: id,
+            message: `You have been invited to join the section in course '${classSession.course.title}'. Do you accept?`,
+            type: "raport_section_addition",
+            isRead: false,
+            sectionId: newSection.id,
+          }));
+          await Notification.bulkCreate(notificationsToCreate);
+      }
 
       res.status(201).json({
         message:
-        "Raport submitted successfully, section created, and notifications sent.",
+          "Raport submitted successfully, section created, and notifications sent.",
         raport: newRaport,
         section: newSection,
         notificationsSent: notificationsToCreate.length,
@@ -417,12 +428,13 @@ class_sessions_router.get(
         ],
       });
 
-      // 5. Map and Filter
       const sessionsWithRaports = classSessions.map((session) => {
         
-        // Find a raport for this session where the current user is a member
         const myRaport = raports.find((r) => {
-          // A. Is the user in this section?
+
+          if (r.classSessionId !== session.id) {
+            return false;
+          }
           const isMember = r.section.users.some((u) => u.id === userId);
           if (!isMember) return false;
 

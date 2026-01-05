@@ -34,6 +34,12 @@ module.exports = (sequelize) => {
     {
       tableName: "presence",
       timestamps: true,
+      indexes: [
+        {
+          unique: true,
+          fields: ["classSessionId", "userId"],
+        },
+      ],
     },
   );
 
