@@ -13,6 +13,14 @@ module.exports = (sequelize) => {
         type: DataTypes.TEXT,
         allowNull: true,
       },
+      userId: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        references: {
+          model: "users",
+          key: "id",
+        },
+      },
       classSessionId: {
         type: DataTypes.INTEGER,
         allowNull: false,
@@ -37,6 +45,10 @@ module.exports = (sequelize) => {
   );
 
   Raport.associate = (models) => {
+    Raport.belongsTo(models.User, {
+      foreignKey: "userId",
+      as: "author",
+    });
     Raport.belongsTo(models.ClassSession, {
       foreignKey: "classSessionId",
       as: "classSession",
