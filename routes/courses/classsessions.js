@@ -428,32 +428,29 @@ class_sessions_router.get(
         ],
       });
 
-      const sessionsWithRaports = classSessions.map((session) => {
-        
-        const myRaport = raports.find((r) => {
+     const assessments = await Assessment.findAll({
+        where: {
+          classSessionId: sessionIds,
+          userId: userId // Only get assessments for the requesting user
+        },
+        attributes: ['classSessionId', 'grade', 'feedback']
+      });
 
-          if (r.classSessionId !== session.id) {
-            return false;
-          }
+      // 6. Map data to sessions
+      const sessionsWithData = classSessions.map((session) => {
+        
+        // A. Handle Raport Logic (Existing)
+        const myRaport = raports.find((r) => {
+          if (r.classSessionId !== session.id) return false;
           const isMember = r.section.users.some((u) => u.id === userId);
           if (!isMember) return false;
-
-          // B. Is the user the owner (author)?
-          // Note: r.userId comes from the Raport model definition you provided
           const isOwner = r.userId === userId; 
-
-          // C. Is the section Active?
-          // Guard clause in case status is missing for some reason
           const statusName = r.section.status ? r.section.status.name : "";
           const isActive = statusName === "Active";
-
-          // LOGIC: Show if Active OR (Pending AND isOwner)
           return isActive || isOwner;
         });
 
-        // Format the raport for frontend if found
         let raportForFrontend = null;
-        
         if (myRaport) {
           raportForFrontend = {
             id: myRaport.id,
@@ -463,24 +460,29 @@ class_sessions_router.get(
             createdAt: myRaport.createdAt,
             updatedAt: myRaport.updatedAt,
             files: myRaport.files || [],
-            // Include full section info (Status + Users)
             section: {
               id: myRaport.section.id,
               name: myRaport.section.name,
               statusId: myRaport.section.statusId,
-              status: myRaport.section.status, // Contains { id, name: "Pending" }
-              users: myRaport.section.users,   // Contains [{ id, firstName... }]
+              status: myRaport.section.status,
+              users: myRaport.section.users,
             },
           };
         }
 
+        // --- B. NEW: Handle Assessment Logic ---
+        const myAssessment = assessments.find(a => a.classSessionId === session.id);
+
         return {
           ...session.toJSON(),
           raport: raportForFrontend,
+          // Attach grade/feedback directly to the session object
+          grade: myAssessment ? myAssessment.grade : null,
+          feedback: myAssessment ? myAssessment.feedback : null
         };
       });
 
-      res.status(200).json(sessionsWithRaports);
+      res.status(200).json(sessionsWithData);
     } catch (error) {
       console.error("Error fetching class sessions with raports:", error);
       res
