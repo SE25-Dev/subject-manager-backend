@@ -64,4 +64,51 @@ presence_router.get(
   },
 );
 
+/**
+ * PUT /courses/:courseId/class_sessions/:classSessionId/presence
+ * Bulk updates or creates presence records for a class session.
+ * Only accessible by 'teacher' and 'headteacher'.
+ */
+presence_router.put(
+  "/:courseId/class_sessions/:classSessionId/presence",
+  verifyTokenAndExtractUser,
+  checkRole(["teacher", "headteacher"]),
+  async (req, res) => {
+    const { courseId, classSessionId } = req.params;
+    const { records } = req.body; 
+
+    if (!records || !Array.isArray(records)) {
+      return res.status(400).json({ error: "Invalid data format. 'records' array is required." });
+    }
+
+    try {
+      const classSession = await ClassSession.findByPk(classSessionId);
+      if (!classSession) {
+        return res.status(404).json({ error: "Class session not found." });
+      }
+
+      if (classSession.courseId != courseId) {
+        return res.status(400).json({ 
+          error: "Class session does not belong to the specified course." 
+        });
+      }
+
+      const presenceData = records.map((record) => ({
+        classSessionId: parseInt(classSessionId),
+        userId: record.userId,
+        present: record.present,
+      }));
+
+      await Presence.bulkCreate(presenceData, {
+        updateOnDuplicate: ["present", "updatedAt"], 
+      });
+
+      res.status(200).json({ message: "Presence records updated successfully." });
+
+    } catch (error) {
+      console.error("Error updating presence records:", error);
+      res.status(500).json({ error: "Failed to update presence records." });
+    }
+  }
+);
 module.exports = presence_router;

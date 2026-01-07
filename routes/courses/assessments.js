@@ -118,4 +118,72 @@ assessments_router.get(
   },
 );
 
+/**
+ * PUT /courses/:courseId/class_sessions/:classSessionId/assessments
+ */
+assessments_router.put(
+  "/:courseId/class_sessions/:classSessionId/assessments",
+  verifyTokenAndExtractUser,
+  checkRole(["teacher", "headteacher"]),
+  async (req, res) => {
+    const { courseId, classSessionId } = req.params;
+    const { userId, grade, feedback } = req.body; // feedback is extracted here
+
+    // Basic validation
+    if (!userId || grade === undefined) {
+      return res.status(400).json({ error: "userId and grade are required." });
+    }
+
+    // Strict Validation: Range 0-5
+    const numericGrade = parseFloat(grade);
+    if (isNaN(numericGrade) || numericGrade < 0 || numericGrade > 5) {
+      return res.status(400).json({ error: "Grade must be a number between 0 and 5." });
+    }
+
+    try {
+      const classSession = await ClassSession.findByPk(classSessionId);
+      if (!classSession) {
+        return res.status(404).json({ error: "Class session not found." });
+      }
+
+      if (classSession.courseId != courseId) {
+        return res.status(400).json({ 
+          error: "Class session does not belong to the specified course." 
+        });
+      }
+
+      const existingAssessment = await Assessment.findOne({
+        where: {
+          classSessionId: classSessionId,
+          userId: userId
+        }
+      });
+
+      let result;
+
+      if (existingAssessment) {
+        // --- FIX: Include feedback in update ---
+        result = await existingAssessment.update({
+          grade: numericGrade,
+          feedback: feedback // Save the feedback
+        });
+      } else {
+        // --- FIX: Include feedback in create ---
+        result = await Assessment.create({
+          classSessionId: parseInt(classSessionId),
+          userId: userId,
+          grade: numericGrade,
+          feedback: feedback // Save the feedback
+        });
+      }
+
+      res.status(200).json(result);
+
+    } catch (error) {
+      console.error("Error saving assessment:", error);
+      res.status(500).json({ error: "Failed to save assessment." });
+    }
+  }
+);
+
 module.exports = assessments_router;
